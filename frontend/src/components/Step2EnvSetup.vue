@@ -206,7 +206,10 @@
                   <div class="timeline-content">
                     <div class="post-header">
                       <span class="post-role">{{ post.poster_type }}</span>
-                      <span class="post-id">Agent {{ post.poster_agent_id }}</span>
+                      <span class="post-agent-info">
+                        <span class="post-id">Agent {{ post.poster_agent_id }}</span>
+                        <span class="post-username">@{{ getAgentUsername(post.poster_agent_id) }}</span>
+                      </span>
                     </div>
                     <p class="post-text">{{ post.content }}</p>
                   </div>
@@ -411,6 +414,15 @@ const displayProfiles = computed(() => {
   }
   return profiles.value.slice(0, 6)
 })
+
+// 根据agent_id获取对应的username
+const getAgentUsername = (agentId) => {
+  if (profiles.value && profiles.value.length > agentId && agentId >= 0) {
+    const profile = profiles.value[agentId]
+    return profile?.username || `agent_${agentId}`
+  }
+  return `agent_${agentId}`
+}
 
 // 计算所有人设的关联话题总数
 const totalTopicsCount = computed(() => {
@@ -1478,10 +1490,23 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
-.post-id {
+.post-agent-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.post-id,
+.post-username {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: #999;
+  color: #666;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.post-username {
+  margin-right: 6px;
 }
 
 .post-text {
