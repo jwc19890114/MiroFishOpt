@@ -661,6 +661,72 @@ const parseInterview = (text) => {
       result.selectionReason = reasonMatch[1].trim()
     }
     
+    // 解析每个人的选择理由
+    const parseIndividualReasons = (reasonText) => {
+      const reasons = {}
+      if (!reasonText) return reasons
+      
+      const lines = reasonText.split(/\n+/)
+      let currentName = null
+      let currentReason = []
+      
+      for (const line of lines) {
+        let headerMatch = null
+        let name = null
+        let reasonStart = null
+        
+        // 格式1: 数字. **名字（index=X）**：理由
+        // 例如: 1. **校友_345（index=1）**：作为武大校友...
+        headerMatch = line.match(/^\d+\.\s*\*\*([^*（(]+)(?:[（(]index\s*=?\s*\d+[)）])?\*\*[：:]\s*(.*)/)
+        if (headerMatch) {
+          name = headerMatch[1].trim()
+          reasonStart = headerMatch[2]
+        }
+        
+        // 格式2: - 选择名字（index X）：理由
+        // 例如: - 选择家长_601（index 0）：作为家长群体代表...
+        if (!headerMatch) {
+          headerMatch = line.match(/^-\s*选择([^（(]+)(?:[（(]index\s*=?\s*\d+[)）])?[：:]\s*(.*)/)
+          if (headerMatch) {
+            name = headerMatch[1].trim()
+            reasonStart = headerMatch[2]
+          }
+        }
+        
+        // 格式3: - **名字（index X）**：理由
+        // 例如: - **家长_601（index 0）**：作为家长群体代表...
+        if (!headerMatch) {
+          headerMatch = line.match(/^-\s*\*\*([^*（(]+)(?:[（(]index\s*=?\s*\d+[)）])?\*\*[：:]\s*(.*)/)
+          if (headerMatch) {
+            name = headerMatch[1].trim()
+            reasonStart = headerMatch[2]
+          }
+        }
+        
+        if (name) {
+          // 保存上一个人的理由
+          if (currentName && currentReason.length > 0) {
+            reasons[currentName] = currentReason.join(' ').trim()
+          }
+          // 开始新的人
+          currentName = name
+          currentReason = reasonStart ? [reasonStart.trim()] : []
+        } else if (currentName && line.trim() && !line.match(/^未选|^综上|^最终选择/)) {
+          // 理由的续行（排除结尾总结段落）
+          currentReason.push(line.trim())
+        }
+      }
+      
+      // 保存最后一个人的理由
+      if (currentName && currentReason.length > 0) {
+        reasons[currentName] = currentReason.join(' ').trim()
+      }
+      
+      return reasons
+    }
+    
+    const individualReasons = parseIndividualReasons(result.selectionReason)
+    
     // 提取每个采访记录
     const interviewBlocks = text.split(/#### 采访 #\d+:/).slice(1)
     
@@ -671,6 +737,7 @@ const parseInterview = (text) => {
         name: '',
         role: '',
         bio: '',
+        selectionReason: '',
         questions: [],
         twitterAnswer: '',
         redditAnswer: '',
@@ -686,6 +753,8 @@ const parseInterview = (text) => {
       if (nameRoleMatch) {
         interview.name = nameRoleMatch[1].trim()
         interview.role = nameRoleMatch[2].trim()
+        // 设置该人的选择理由
+        interview.selectionReason = individualReasons[interview.name] || ''
       }
       
       // 提取简介
@@ -1077,6 +1146,12 @@ const InterviewDisplay = {
             h('div', { class: 'profile-role' }, props.result.interviews[activeIndex.value]?.role || ''),
             props.result.interviews[activeIndex.value]?.bio && h('div', { class: 'profile-bio' }, props.result.interviews[activeIndex.value].bio)
           ])
+        ]),
+        
+        // Selection Reason - 选择理由
+        props.result.interviews[activeIndex.value]?.selectionReason && h('div', { class: 'selection-reason' }, [
+          h('div', { class: 'reason-label' }, '选择理由'),
+          h('div', { class: 'reason-content' }, props.result.interviews[activeIndex.value].selectionReason)
         ]),
         
         // Q&A Conversation Thread - 一问一答样式
@@ -3366,6 +3441,30 @@ watch(() => props.reportId, (newId) => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Selection Reason - 选择理由 */
+:deep(.interview-display .selection-reason) {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+:deep(.interview-display .reason-label) {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+}
+
+:deep(.interview-display .reason-content) {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.6;
 }
 
 /* Q&A Thread - Clean list */
