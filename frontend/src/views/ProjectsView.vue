@@ -5,7 +5,7 @@
 
       <div class="nav-center">
         <div class="title">历史项目</div>
-        <div class="subtitle">默认只显示“环境搭建完成”的项目，点击可直接进入环境</div>
+        <div class="subtitle">默认只显示“已生成报告/可交互”的项目，点击可直接进入交互页</div>
       </div>
 
       <div class="nav-actions">
@@ -20,16 +20,17 @@
           <input
             v-model="query"
             class="search-input"
-            placeholder="搜索项目名称 / 项目ID / 图谱ID / 模拟ID"
+            placeholder="搜索项目名称 / 项目ID / 图谱ID / 模拟ID / 报告ID"
             :disabled="loading"
           />
           <button class="btn" @click="clearQuery" :disabled="!query">清空</button>
         </div>
         <div class="filter">
-          <label class="toggle">
-            <input v-model="onlyEnvReady" type="checkbox" :disabled="loading" />
-            仅显示已完成环境搭建
-          </label>
+          <select v-model="filterMode" class="select" :disabled="loading">
+            <option value="interactive">仅显示可交互（报告已生成）</option>
+            <option value="env">仅显示环境已就绪</option>
+            <option value="all">显示全部</option>
+          </select>
         </div>
         <div class="meta">
           <span v-if="loading">加载中...</span>
@@ -52,7 +53,7 @@
       <div v-else class="list">
         <div class="list-header">
           <div class="col name">项目</div>
-          <div class="col status">环境</div>
+          <div class="col status">交互</div>
           <div class="col ids">ID</div>
           <div class="col time">更新时间</div>
           <div class="col action">操作</div>
@@ -63,7 +64,7 @@
           :key="p.project_id"
           class="row"
           type="button"
-          @click="p.latest_ready_simulation?.simulation_id ? openEnv(p.latest_ready_simulation.simulation_id) : openProject(p.project_id)"
+          @click="p.latest_completed_report?.report_id ? openInteraction(p.latest_completed_report.report_id) : (p.latest_report?.report_id ? openReport(p.latest_report.report_id) : (p.latest_ready_simulation?.simulation_id ? openEnv(p.latest_ready_simulation.simulation_id) : openProject(p.project_id)))"
         >
           <div class="col name">
             <div class="name-main">{{ p.name || 'Unnamed Project' }}</div>
@@ -72,8 +73,8 @@
             </div>
           </div>
           <div class="col status">
-            <span class="status-pill" :class="envStatusClass(p.latest_ready_simulation?.status)">
-              {{ envStatusText(p.latest_ready_simulation?.status) }}
+            <span class="status-pill" :class="reportStatusClass(p.latest_completed_report?.report_status || p.latest_report?.report_status)">
+              {{ reportStatusText(p.latest_completed_report?.report_status || p.latest_report?.report_status) }}
             </span>
           </div>
           <div class="col ids">
@@ -82,15 +83,34 @@
             <div class="mono muted" v-if="p.latest_ready_simulation?.simulation_id">
               sim: {{ p.latest_ready_simulation.simulation_id }}
             </div>
+            <div class="mono muted" v-if="p.latest_completed_report?.report_id || p.latest_report?.report_id">
+              report: {{ p.latest_completed_report?.report_id || p.latest_report?.report_id }}
+            </div>
           </div>
           <div class="col time">
-            {{ formatTime(p.latest_ready_simulation?.updated_at || p.updated_at || p.created_at) }}
+            {{ formatTime(p.latest_completed_report?.updated_at || p.latest_report?.updated_at || p.latest_ready_simulation?.updated_at || p.updated_at || p.created_at) }}
           </div>
           <div class="col action">
             <div class="actions" @click.stop>
               <button
-                v-if="p.latest_ready_simulation?.simulation_id"
+                v-if="p.latest_completed_report?.report_id"
                 class="mini-btn primary"
+                type="button"
+                @click="openInteraction(p.latest_completed_report.report_id)"
+              >
+                交互 →
+              </button>
+              <button
+                v-if="p.latest_completed_report?.report_id || p.latest_report?.report_id"
+                class="mini-btn"
+                type="button"
+                @click="openReport(p.latest_completed_report?.report_id || p.latest_report?.report_id)"
+              >
+                报告 →
+              </button>
+              <button
+                v-if="p.latest_ready_simulation?.simulation_id"
+                class="mini-btn"
                 type="button"
                 @click="openEnv(p.latest_ready_simulation.simulation_id)"
               >
@@ -110,6 +130,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { listProjects } from '../api/graph'
 import { listSimulations } from '../api/simulation'
+import { checkReportStatus } from '../api/report'
 
 const router = useRouter()
 
@@ -117,7 +138,7 @@ const loading = ref(false)
 const error = ref('')
 const projects = ref([])
 const query = ref('')
-const onlyEnvReady = ref(true)
+const filterMode = ref('interactive')
 
 const ENV_READY_STATUSES = new Set(['ready', 'running', 'paused', 'stopped', 'completed'])
 
@@ -152,8 +173,70 @@ const refresh = async () => {
       }
     }
 
+    const simsByProjectId = new Map()
+    for (const sim of allSimulations) {
+      if (!ENV_READY_STATUSES.has(sim?.status)) continue
+      if (!sim?.project_id || !sim?.simulation_id) continue
+      if (!simsByProjectId.has(sim.project_id)) simsByProjectId.set(sim.project_id, [])
+      simsByProjectId.get(sim.project_id).push(sim)
+    }
+
+    for (const [projectId, sims] of simsByProjectId.entries()) {
+      sims.sort((a, b) => {
+        const at = Date.parse(a?.updated_at || a?.created_at || '') || 0
+        const bt = Date.parse(b?.updated_at || b?.created_at || '') || 0
+        return bt - at
+      })
+      simsByProjectId.set(projectId, sims)
+    }
+
+    const latestReportByProjectId = new Map()
+    const latestCompletedReportByProjectId = new Map()
+    await Promise.all(
+      baseProjects.map(async p => {
+        const sims = simsByProjectId.get(p.project_id) || []
+        let latestAnyReport = null
+        for (const sim of sims) {
+          try {
+            const r = await checkReportStatus(sim.simulation_id)
+
+            if (r?.success && r?.data?.has_report && r?.data?.report_id && !latestAnyReport) {
+              latestAnyReport = {
+                report_id: r.data.report_id,
+                simulation_id: sim.simulation_id,
+                report_status: r.data.report_status,
+                interview_unlocked: !!r.data.interview_unlocked,
+                updated_at: sim.updated_at || sim.created_at || null
+              }
+            }
+
+            if (r?.success && r?.data?.interview_unlocked && r?.data?.report_id) {
+              const completed = {
+                report_id: r.data.report_id,
+                simulation_id: sim.simulation_id,
+                report_status: r.data.report_status,
+                interview_unlocked: true,
+                updated_at: sim.updated_at || sim.created_at || null
+              }
+              latestCompletedReportByProjectId.set(p.project_id, completed)
+              if (!latestAnyReport) latestAnyReport = completed
+              break
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (latestAnyReport) {
+          latestReportByProjectId.set(p.project_id, latestAnyReport)
+        }
+      })
+    )
+
     projects.value = baseProjects.map(p => {
       const latestReady = latestReadyByProjectId.get(p.project_id) || null
+      const latestReport = latestCompletedReportByProjectId.get(p.project_id) || null
+      const latestAny = latestReportByProjectId.get(p.project_id) || null
       return {
         ...p,
         latest_ready_simulation: latestReady
@@ -162,7 +245,9 @@ const refresh = async () => {
               status: latestReady.status,
               updated_at: latestReady.updated_at || latestReady.created_at || null
             }
-          : null
+          : null,
+        latest_report: latestAny,
+        latest_completed_report: latestReport
       }
     })
   } catch (e) {
@@ -180,9 +265,8 @@ const filteredProjects = computed(() => {
   const q = query.value.trim().toLowerCase()
   let base = projects.value
 
-  if (onlyEnvReady.value) {
-    base = base.filter(p => p?.latest_ready_simulation?.simulation_id)
-  }
+  if (filterMode.value === 'env') base = base.filter(p => p?.latest_ready_simulation?.simulation_id)
+  if (filterMode.value === 'interactive') base = base.filter(p => p?.latest_completed_report?.report_id)
 
   if (!q) return base
 
@@ -192,7 +276,8 @@ const filteredProjects = computed(() => {
       p?.project_id,
       p?.graph_id,
       p?.simulation_requirement,
-      p?.latest_ready_simulation?.simulation_id
+      p?.latest_ready_simulation?.simulation_id,
+      p?.latest_completed_report?.report_id
     ]
       .filter(Boolean)
       .join(' ')
@@ -210,6 +295,16 @@ const openProject = (projectId) => {
 const openEnv = (simulationId) => {
   if (!simulationId) return
   router.push({ name: 'Simulation', params: { simulationId } })
+}
+
+const openReport = (reportId) => {
+  if (!reportId) return
+  router.push({ name: 'Report', params: { reportId } })
+}
+
+const openInteraction = (reportId) => {
+  if (!reportId) return
+  router.push({ name: 'Interaction', params: { reportId } })
 }
 
 const envStatusText = (status) => {
@@ -244,6 +339,21 @@ const envStatusClass = (status) => {
     default:
       return 'neutral'
   }
+}
+
+const reportStatusText = (status) => {
+  if (!status) return '未生成'
+  if (status === 'completed') return '已解锁'
+  if (status === 'generating') return '生成中'
+  if (status === 'failed') return '失败'
+  return status
+}
+
+const reportStatusClass = (status) => {
+  if (status === 'completed') return 'ok'
+  if (status === 'generating') return 'running'
+  if (status === 'failed') return 'bad'
+  return 'neutral'
 }
 
 const formatTime = (isoString) => {
@@ -368,17 +478,14 @@ onMounted(() => {
   font-size: 0.9rem;
 }
 
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.toggle input {
-  width: 16px;
-  height: 16px;
+.select {
+  height: 38px;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 0 10px;
+  background: #fff;
+  outline: none;
+  font-size: 0.92rem;
 }
 
 .search-input {
