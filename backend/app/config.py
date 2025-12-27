@@ -20,6 +20,12 @@ else:
 class Config:
     """Flask配置类"""
     
+    # 存储后端配置
+    # - zep: 使用 Zep Cloud 图谱（现有实现）
+    # - local: Neo4j + Qdrant（本地化存储）
+    GRAPH_BACKEND = os.environ.get('GRAPH_BACKEND', 'local').lower()
+    VECTOR_BACKEND = os.environ.get('VECTOR_BACKEND', 'qdrant').lower()  # qdrant | none
+
     # Flask配置
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
@@ -31,9 +37,25 @@ class Config:
     LLM_API_KEY = os.environ.get('LLM_API_KEY')
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
     LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
+
+    # Embedding 配置（默认复用 LLM 配置）
+    EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY') or LLM_API_KEY
+    EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL') or LLM_BASE_URL
+    EMBEDDING_MODEL_NAME = os.environ.get('EMBEDDING_MODEL_NAME', 'text-embedding-3-small')
     
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
+
+    # Neo4j 配置（GRAPH_BACKEND=local）
+    NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+    NEO4J_USER = os.environ.get('NEO4J_USER', 'neo4j')
+    NEO4J_PASSWORD = os.environ.get('NEO4J_PASSWORD')
+    NEO4J_DATABASE = os.environ.get('NEO4J_DATABASE', 'neo4j')
+
+    # Qdrant 配置（VECTOR_BACKEND=qdrant）
+    QDRANT_URL = os.environ.get('QDRANT_URL', 'http://localhost:6333')
+    QDRANT_API_KEY = os.environ.get('QDRANT_API_KEY')
+    QDRANT_COLLECTION_CHUNKS = os.environ.get('QDRANT_COLLECTION_CHUNKS', 'mirofish_chunks')
     
     # 文件上传配置
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
@@ -69,7 +91,20 @@ class Config:
         errors = []
         if not cls.LLM_API_KEY:
             errors.append("LLM_API_KEY 未配置")
-        if not cls.ZEP_API_KEY:
-            errors.append("ZEP_API_KEY 未配置")
+        if cls.GRAPH_BACKEND not in {"zep", "local"}:
+            errors.append("GRAPH_BACKEND 仅支持 zep 或 local")
+
+        if cls.GRAPH_BACKEND == "zep":
+            if not cls.ZEP_API_KEY:
+                errors.append("ZEP_API_KEY 未配置（GRAPH_BACKEND=zep）")
+
+        if cls.GRAPH_BACKEND == "local":
+            if not cls.NEO4J_PASSWORD:
+                errors.append("NEO4J_PASSWORD 未配置（GRAPH_BACKEND=local）")
+            if cls.VECTOR_BACKEND not in {"qdrant", "none"}:
+                errors.append("VECTOR_BACKEND 仅支持 qdrant 或 none")
+            if cls.VECTOR_BACKEND == "qdrant":
+                if not cls.QDRANT_URL:
+                    errors.append("QDRANT_URL 未配置（VECTOR_BACKEND=qdrant）")
         return errors
 

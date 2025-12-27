@@ -30,6 +30,11 @@ class LLMClient:
             api_key=self.api_key,
             base_url=self.base_url
         )
+        # Embeddings client (may use different key/base_url)
+        self._embedding_client = OpenAI(
+            api_key=Config.EMBEDDING_API_KEY,
+            base_url=Config.EMBEDDING_BASE_URL,
+        )
     
     def chat(
         self,
@@ -88,4 +93,15 @@ class LLMClient:
         )
         
         return json.loads(response)
+
+    def embed_texts(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+        """
+        生成 embeddings（用于向量库）
+        """
+        embed_model = model or Config.EMBEDDING_MODEL_NAME
+        resp = self._embedding_client.embeddings.create(
+            model=embed_model,
+            input=texts,
+        )
+        return [d.embedding for d in resp.data]
 

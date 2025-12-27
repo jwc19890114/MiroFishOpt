@@ -22,12 +22,12 @@ from ..config import Config
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
 from .zep_tools import (
-    ZepToolsService, 
     SearchResult, 
     InsightForgeResult, 
     PanoramaResult,
     InterviewResult
 )
+from .tools_backend import get_tools_service
 
 logger = get_logger('mirofish.report_agent')
 
@@ -507,7 +507,7 @@ class ReportAgent:
         simulation_id: str,
         simulation_requirement: str,
         llm_client: Optional[LLMClient] = None,
-        zep_tools: Optional[ZepToolsService] = None
+        zep_tools: Optional[object] = None
     ):
         """
         初始化Report Agent
@@ -524,7 +524,7 @@ class ReportAgent:
         self.simulation_requirement = simulation_requirement
         
         self.llm = llm_client or LLMClient()
-        self.zep_tools = zep_tools or ZepToolsService()
+        self.zep_tools = zep_tools or get_tools_service()
         
         # 工具定义
         self.tools = self._define_tools()

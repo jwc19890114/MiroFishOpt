@@ -14,6 +14,7 @@ from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
+from ..services.tools_backend import get_tools_service
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.api.report')
@@ -952,9 +953,7 @@ def search_graph_tool():
                 "error": "请提供 graph_id 和 query"
             }), 400
         
-        from ..services.zep_tools import ZepToolsService
-        
-        tools = ZepToolsService()
+        tools = get_tools_service()
         result = tools.search_graph(
             graph_id=graph_id,
             query=query,
@@ -996,9 +995,7 @@ def get_graph_statistics_tool():
                 "error": "请提供 graph_id"
             }), 400
         
-        from ..services.zep_tools import ZepToolsService
-        
-        tools = ZepToolsService()
+        tools = get_tools_service()
         result = tools.get_graph_statistics(graph_id)
         
         return jsonify({

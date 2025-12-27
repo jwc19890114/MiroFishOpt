@@ -87,8 +87,36 @@ LLM_API_KEY=your_api_key
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL_NAME=qwen-plus
 
-# Zep Cloud 配置
-# 每月免费额度即可支撑简单使用：https://app.getzep.com/
+# 存储后端（推荐本地化：Neo4j + Qdrant）
+GRAPH_BACKEND=local
+VECTOR_BACKEND=qdrant
+
+# Neo4j（docker-compose.local.yml 默认账号 neo4j / mirofish）
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=mirofish
+NEO4J_DATABASE=neo4j
+
+# Qdrant
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION_CHUNKS=mirofish_chunks
+
+# Embedding（默认复用 LLM 配置；若你的 LLM 提供方不支持 embeddings，可改用支持 embeddings 的配置，或将 VECTOR_BACKEND=none）
+EMBEDDING_MODEL_NAME=text-embedding-3-small
+```
+
+### （可选）启动本地 Neo4j + Qdrant
+
+如果你使用 `GRAPH_BACKEND=local`，建议用 Docker 启动本地依赖：
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+
+如需继续使用 Zep Cloud（可能遇到免费版限流 429）：
+
+```env
+GRAPH_BACKEND=zep
 ZEP_API_KEY=your_zep_api_key
 ```
 
