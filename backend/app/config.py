@@ -44,6 +44,13 @@ class Config:
     EXTRACT_BASE_URL = os.environ.get('EXTRACT_BASE_URL') or LLM_BASE_URL
     EXTRACT_MODEL_NAME = os.environ.get('EXTRACT_MODEL_NAME') or LLM_MODEL_NAME
 
+    # 报告生成LLM（默认复用 LLM 配置）
+    # 说明：部分国内供应商对“输入内容审核”更严格，报告生成时会携带模拟/检索到的原始内容，可能触发 data_inspection_failed。
+    #       可单独将报告生成切换到更合适的 OpenAI 兼容供应商/模型。
+    REPORT_API_KEY = os.environ.get('REPORT_API_KEY') or LLM_API_KEY
+    REPORT_BASE_URL = os.environ.get('REPORT_BASE_URL') or LLM_BASE_URL
+    REPORT_MODEL_NAME = os.environ.get('REPORT_MODEL_NAME') or LLM_MODEL_NAME
+
     # Embedding 配置（默认复用 LLM 配置）
     EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY') or LLM_API_KEY
     EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL') or LLM_BASE_URL

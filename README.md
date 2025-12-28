@@ -26,6 +26,10 @@
 - 用于“本体生成 / 实体关系抽取”等 JSON 结构化任务
 - 当你遇到 `400 data_inspection_failed / inappropriate content`（某些供应商更严格）时，可只替换抽取模型，不影响主 LLM 配置。
 
+另新增 `REPORT_API_KEY / REPORT_BASE_URL / REPORT_MODEL_NAME`：
+- 用于“报告生成”（ReportAgent）
+- 报告生成会携带模拟/检索到的原始文本，部分供应商可能对“输入内容审核”更严格；此时可单独切换报告模型（不影响抽取与主对话）。
+
 同时做了兼容增强：
 - `LLM_BASE_URL` 自动补全 `/v1`（部分 OpenAI-compatible 提供方要求）
 - JSON 输出解析更健壮（部分提供方不支持 `response_format=json_object` 时自动降级）
@@ -136,6 +140,11 @@ QDRANT_URL=http://localhost:6333
 # EXTRACT_BASE_URL=...
 # EXTRACT_MODEL_NAME=...
 
+# 报告专用 LLM：报告生成触发 data_inspection_failed 时使用
+# REPORT_API_KEY=...
+# REPORT_BASE_URL=...
+# REPORT_MODEL_NAME=...
+
 # Embeddings：如果你的提供方支持 embeddings，建议配置；不支持则可 VECTOR_BACKEND=none
 EMBEDDING_MODEL_NAME=...
 # EMBEDDING_BASE_URL=...
@@ -148,6 +157,22 @@ EMBEDDING_MODEL_NAME=...
 
 ```bash
 npm run setup:all
+```
+
+如果你不想使用 `uv`，也可以用原生 `venv + pip`（仅安装后端 Python 依赖）：
+
+```bash
+cd backend
+python -m venv .venv
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+
+# macOS/Linux
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 ### 4) 启动服务
@@ -164,14 +189,22 @@ npm run dev
 
 1. Step1 图谱构建：上传材料 → 生成本体 → 构图（本地写入 Neo4j，可选写入 Qdrant）
 2. Step2 环境准备：基于图谱实体生成 Agent Profiles（写入 `backend/uploads/simulations/<simulation_id>/...`）
-3. Step3 启动模拟：启动并行模拟（Twitter + Reddit），本地模式会自动关闭“图谱记忆实时回写”
+3. Step3 启动模拟：启动并行模拟（Twitter + Reddit），本地模式会自动关闭“图谱记忆实时回写”；需要中途停止时可点击页面右上角「暂停模拟」
 4. Step4 生成报告：ReportAgent 调用本地工具（图 + 向量 + 采访）生成报告
 5. Step5 交互：对报告与模拟世界进行交互式查询
+
+## 报告导出
+
+- 报告生成完成后支持导出为 Markdown：
+  - 页面 Step4 右侧有「导出报告（MD）」按钮
+  - 或直接访问：`GET /api/report/<report_id>/download`
+- 本地文件也会落盘在：`backend/uploads/reports/<report_id>/full_report.md`
 
 ## 常见问题（Troubleshooting）
 
 - 报错 `400 data_inspection_failed / inappropriate content`：
-  - 这是提供方的输出审核拦截；使用 `EXTRACT_*` 把“抽取模型”单独切换到更合适的提供方/模型。
+  - 如果发生在“构图/抽取”阶段：使用 `EXTRACT_*` 把“抽取模型”单独切换到更合适的提供方/模型。
+  - 如果发生在“报告生成”阶段：使用 `REPORT_*` 把“报告模型”单独切换到更合适的提供方/模型（后端也会自动尝试安全模式降级，但报告会更抽象）。
 - 启动模拟 `HTTP 400: 未准备好，请先 prepare`：
   - Step3 已增加自动 prepare；如果仍发生，请确认你启动的是 `MiroFish-Optimize` 这套后端（端口 5001）。
 - 报错 `interview_agents ... env 未运行或已关闭`：
@@ -182,4 +215,3 @@ npm run dev
 ## License
 
 遵循上游 MiroFish 的开源许可证（仓库根目录 `LICENSE`）。
-

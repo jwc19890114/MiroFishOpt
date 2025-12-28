@@ -1,0 +1,8 @@
+# Convenience wrapper: install backend Python dependencies from project root.
+#
+# Usage (after activating your venv):
+#   python -m pip install -r requirements.txt
+#
+# Note: the authoritative dependency list lives in `backend/requirements.txt`
+# (and `backend/pyproject.toml` for `uv sync`).
+-r backend/requirements.txt

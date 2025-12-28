@@ -68,3 +68,12 @@ export const listReports = (simulationId = null, limit = 200) => {
 export const checkReportStatus = (simulationId) => {
   return service.get(`/api/report/check/${simulationId}`)
 }
+
+/**
+ * 获取报告下载链接（Markdown）
+ * @param {string} reportId
+ */
+export const getReportDownloadUrl = (reportId) => {
+  const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'
+  return `${base}/api/report/${reportId}/download`
+}

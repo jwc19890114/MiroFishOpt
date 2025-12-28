@@ -91,6 +91,14 @@
       </div>
 
       <div class="action-controls">
+        <button
+          class="action-btn danger"
+          :disabled="phase !== 1 || isStopping"
+          @click="handleStopSimulation"
+        >
+          <span v-if="isStopping" class="loading-spinner-small"></span>
+          {{ isStopping ? '暂停中...' : '暂停模拟' }}
+        </button>
         <button 
           class="action-btn primary"
           :disabled="phase !== 2 || isGeneratingReport"
@@ -941,6 +949,12 @@ onUnmounted(() => {
 }
 
 /* Action Button */
+.action-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .action-btn {
   display: inline-flex;
   align-items: center;
@@ -963,6 +977,16 @@ onUnmounted(() => {
 
 .action-btn.primary:hover:not(:disabled) {
   background: #333;
+}
+
+.action-btn.danger {
+  background: #FFF;
+  color: #D64545;
+  border: 1px solid #D64545;
+}
+
+.action-btn.danger:hover:not(:disabled) {
+  background: #FFF5F5;
 }
 
 .action-btn:disabled {
