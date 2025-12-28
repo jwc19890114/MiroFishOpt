@@ -41,6 +41,7 @@ class LocalEntity:
     entity_type: str
     summary: str = ""
     attributes: Optional[Dict[str, Any]] = None
+    source_entity_types: Optional[List[str]] = None
     created_at: Optional[str] = None
 
     @property
@@ -149,8 +150,18 @@ class LocalNeo4jGraphStore:
                         e.graph_id = $graph_id,
                         e.name = $name,
                         e.entity_type = $entity_type,
-                        e.summary = COALESCE($summary, e.summary),
-                        e.attributes_json = COALESCE($attributes_json, e.attributes_json),
+                        e.summary = CASE
+                            WHEN $summary IS NULL OR $summary = "" THEN e.summary
+                            ELSE $summary
+                        END,
+                        e.attributes_json = CASE
+                            WHEN $attributes_json IS NULL OR $attributes_json = "{}" THEN e.attributes_json
+                            ELSE $attributes_json
+                        END,
+                        e.source_entity_types = CASE
+                            WHEN e.source_entity_types IS NULL THEN $source_entity_types
+                            ELSE e.source_entity_types + [t IN $source_entity_types WHERE NOT t IN e.source_entity_types]
+                        END,
                         e.created_at = COALESCE(e.created_at, $created_at)
                     """,
                     uuid=ent.uuid,
@@ -160,6 +171,7 @@ class LocalNeo4jGraphStore:
                     entity_type=ent.entity_type,
                     summary=ent.summary or "",
                     attributes_json=json.dumps(ent.attributes or {}, ensure_ascii=False),
+                    source_entity_types=list(dict.fromkeys([t for t in (ent.source_entity_types or []) if t])),
                     created_at=ent.created_at or _now_iso(),
                 )
         return uuids
@@ -236,6 +248,7 @@ class LocalNeo4jGraphStore:
                 MATCH (e:Entity {graph_id: $graph_id})
                 RETURN e.uuid AS uuid, e.name AS name, e.entity_type AS entity_type,
                        e.summary AS summary, e.attributes_json AS attributes_json,
+                       e.source_entity_types AS source_entity_types,
                        e.created_at AS created_at
                 """,
                 graph_id=graph_id,
@@ -249,6 +262,8 @@ class LocalNeo4jGraphStore:
                     attrs = json.loads(r.get("attributes_json") or "{}")
                 except Exception:
                     attrs = {}
+                if isinstance(r.get("source_entity_types"), list):
+                    attrs["source_entity_types"] = r.get("source_entity_types")
                 uuid_ = r.get("uuid")
                 name = r.get("name") or ""
                 node_name_map[uuid_] = name

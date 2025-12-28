@@ -16,6 +16,7 @@ from ..utils.logger import get_logger
 from .text_processor import TextProcessor
 from .local_graph_extractor import LocalGraphExtractor
 from .local_graph_store import LocalEntity, LocalNeo4jGraphStore, LocalRelation
+from .entity_type_normalizer import canonicalize_entity_type
 from .local_vector_store import QdrantChunkStore
 
 logger = get_logger("mirofish.local_graph_builder")
@@ -72,6 +73,7 @@ class LocalGraphBuilderService:
 
         chunks = TextProcessor.split_text(text, chunk_size, chunk_overlap)
         total = max(len(chunks), 1)
+        failed_extract_chunks = 0
 
         for idx, chunk in enumerate(chunks):
             ratio = idx / total
@@ -95,20 +97,28 @@ class LocalGraphBuilderService:
                 except Exception as e:
                     logger.warning(f"Qdrant add_chunk failed, continue without vectors: {e}")
 
-            extracted = self.extractor.extract(chunk, ontology=ontology)
+            try:
+                extracted = self.extractor.extract(chunk, ontology=ontology)
+            except Exception as e:
+                failed_extract_chunks += 1
+                logger.warning(f"Extractor failed for chunk {idx+1}/{len(chunks)}; skipping: {e}")
+                continue
             entities_in_chunk = extracted.get("entities") or []
             relations_in_chunk = extracted.get("relations") or []
 
             entities: List[LocalEntity] = []
             for ent in entities_in_chunk:
+                raw_type = ent.get("type", "")
+                canonical_type = canonicalize_entity_type(raw_type)
                 entities.append(
                     LocalEntity(
                         project_id=project_id,
                         graph_id=graph_id,
                         name=ent.get("name", ""),
-                        entity_type=ent.get("type", ""),
+                        entity_type=canonical_type,
                         summary=ent.get("summary", ""),
                         attributes=ent.get("attributes") or {},
+                        source_entity_types=[raw_type] if raw_type else [],
                         created_at=_now_iso(),
                     )
                 )
@@ -123,8 +133,10 @@ class LocalGraphBuilderService:
 
             relations: List[LocalRelation] = []
             for rel in relations_in_chunk:
-                s_key = f"{rel.get('source_type')}:{rel.get('source')}".lower()
-                t_key = f"{rel.get('target_type')}:{rel.get('target')}".lower()
+                s_type = canonicalize_entity_type(rel.get("source_type"))
+                t_type = canonicalize_entity_type(rel.get("target_type"))
+                s_key = f"{s_type}:{rel.get('source')}".lower()
+                t_key = f"{t_type}:{rel.get('target')}".lower()
                 source_uuid = uuid_by_key.get(s_key)
                 target_uuid = uuid_by_key.get(t_key)
                 if not source_uuid or not target_uuid:
@@ -148,6 +160,10 @@ class LocalGraphBuilderService:
             progress_callback("读取图谱数据...", 0.95)
 
         graph_data = self.get_graph_data(graph_id)
+        if failed_extract_chunks:
+            graph_data["build_warnings"] = [
+                f"Extractor failed for {failed_extract_chunks}/{len(chunks)} chunks; graph may be incomplete."
+            ]
         if progress_callback:
             progress_callback("完成", 1.0)
 

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from ..utils.logger import get_logger
 from .local_graph_store import LocalNeo4jGraphStore
+from .entity_type_normalizer import canonicalize_entity_type
 from .zep_entity_reader import EntityNode, FilteredEntities
 
 logger = get_logger("mirofish.local_entity_reader")
@@ -42,12 +43,19 @@ class LocalEntityReader:
 
         filtered_nodes = []
         entity_types: Set[str] = set()
+        defined_set = set(defined_entity_types or [])
+        canonical_defined_set = {canonicalize_entity_type(t) for t in defined_set} if defined_set else set()
         for n in nodes:
             et = _entity_type(n)
             if et:
                 entity_types.add(et)
-            if defined_entity_types and et not in set(defined_entity_types):
-                continue
+            if defined_set:
+                # Accept if canonical label matches canonicalized defined types,
+                # OR if the node records any original extracted types matching the requested list.
+                if et not in canonical_defined_set:
+                    src_types = (n.get("attributes") or {}).get("source_entity_types") or []
+                    if not (set(src_types) & defined_set):
+                        continue
             filtered_nodes.append(n)
 
         filtered_uuids = {n.get("uuid") for n in filtered_nodes if n.get("uuid")}

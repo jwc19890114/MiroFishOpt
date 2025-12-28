@@ -38,6 +38,12 @@ class Config:
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
     LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
 
+    # 结构化抽取 LLM（用于本体生成/实体关系抽取等 JSON 任务；默认复用 LLM 配置）
+    # 有些供应商会对“输出内容审核”更严格，导致 data_inspection_failed，可单独切换到更合适的模型/供应商。
+    EXTRACT_API_KEY = os.environ.get('EXTRACT_API_KEY') or LLM_API_KEY
+    EXTRACT_BASE_URL = os.environ.get('EXTRACT_BASE_URL') or LLM_BASE_URL
+    EXTRACT_MODEL_NAME = os.environ.get('EXTRACT_MODEL_NAME') or LLM_MODEL_NAME
+
     # Embedding 配置（默认复用 LLM 配置）
     EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY') or LLM_API_KEY
     EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL') or LLM_BASE_URL

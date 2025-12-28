@@ -1387,10 +1387,15 @@ def start_simulation():
         
         # 获取图谱ID（用于图谱记忆更新）
         graph_id = None
+        graph_memory_update_warning = None
         if enable_graph_memory_update:
+            if Config.GRAPH_BACKEND != "zep" and enable_graph_memory_update:
+                graph_memory_update_warning = "当前 GRAPH_BACKEND=local 暂不支持实时图谱记忆更新，已自动关闭 enable_graph_memory_update"
+                logger.warning(graph_memory_update_warning)
+                enable_graph_memory_update = False
             # 本地化存储（Neo4j+Qdrant）暂不支持实时图谱记忆回写
             # 避免误触发 Zep 免费版 429 限流导致 500
-            if Config.GRAPH_BACKEND != "zep":
+            if Config.GRAPH_BACKEND != "zep" and enable_graph_memory_update:
                 return jsonify({
                     "success": False,
                     "error": "当前 GRAPH_BACKEND=local 暂不支持实时图谱记忆更新，请关闭 enable_graph_memory_update 或切换 GRAPH_BACKEND=zep"
@@ -1398,13 +1403,13 @@ def start_simulation():
 
             # 从模拟状态或项目中获取 graph_id
             graph_id = state.graph_id
-            if not graph_id:
+            if enable_graph_memory_update and not graph_id:
                 # 尝试从项目中获取
                 project = ProjectManager.get_project(state.project_id)
                 if project:
                     graph_id = project.graph_id
             
-            if not graph_id:
+            if enable_graph_memory_update and not graph_id:
                 return jsonify({
                     "success": False,
                     "error": "启用图谱记忆更新需要有效的 graph_id，请确保项目已构建图谱"
@@ -1429,6 +1434,8 @@ def start_simulation():
         if max_rounds:
             response_data['max_rounds_applied'] = max_rounds
         response_data['graph_memory_update_enabled'] = enable_graph_memory_update
+        if graph_memory_update_warning:
+            response_data['graph_memory_update_warning'] = graph_memory_update_warning
         response_data['force_restarted'] = force_restarted
         if enable_graph_memory_update:
             response_data['graph_id'] = graph_id

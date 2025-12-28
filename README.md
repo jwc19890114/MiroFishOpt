@@ -1,172 +1,185 @@
-<div align="center">
+# MiroFishOpt（基于 MiroFish 的本地化优化版）
 
-<img src="./static/image/MiroFish_logo_compressed.jpeg" alt="MiroFish Logo" width="75%"/>
+本项目目录为 `MiroFish-Optimize`，用于在保留原始 MiroFish 工作流的基础上，把 **图谱/记忆/向量存储本地化**，并提升在真实使用中的可运行性与稳定性。
 
-简洁通用的群体智能引擎，预测万物
-</br>
-<em>A Simple and Universal Swarm Intelligence Engine, Predicting Anything</em>
+## 项目来源
 
-<a href="https://www.shanda.com/" target="_blank"><img src="./static/image/shanda_logo.png" alt="666ghj%2MiroFish | Shanda" height="40"/></a>
+- 上游项目：`https://github.com/666ghj/MiroFish`
+- 上游核心依赖：OASIS 模拟引擎（用于社媒多智能体模拟）
+- 本优化版目标：允许继续调用云端 LLM（推理/抽取），但把 **存储** 全部落到本地（Neo4j + Qdrant），避免 Zep 免费版 429、并让“历史项目/历史图谱”可持续累积。
 
-[![GitHub Stars](https://img.shields.io/github/stars/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/stargazers)
-[![GitHub Watchers](https://img.shields.io/github/watchers/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/watchers)
-[![GitHub Forks](https://img.shields.io/github/forks/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/network)
-[![GitHub Issues](https://img.shields.io/github/issues/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/issues)
-[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/pulls)
+## 做了哪些优化（重点变更点）
 
-[![GitHub License](https://img.shields.io/github/license/666ghj/MiroFish?style=flat-square)](https://github.com/666ghj/MiroFish/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.0-green.svg?style=flat-square)](https://github.com/666ghj/MiroFish)
+### 1) 存储本地化：Neo4j + Qdrant 替代 Zep（可切换）
 
-[English](./README-EN.md) | [中文文档](./README.md)
+- 新增 `GRAPH_BACKEND`：
+  - `local`：Neo4j 存图谱（节点/边/Chunk 关联），Qdrant 存向量（Chunk embeddings）
+  - `zep`：继续使用上游 Zep Cloud（需要 `ZEP_API_KEY`，可能遇到 429）
+- 新增 `VECTOR_BACKEND`：
+  - `qdrant`：启用向量检索
+  - `none`：关闭向量（纯图检索/纯规则兜底）
+- 统一隔离策略：**共用一套库，用 `project_id`（以及 `graph_id`）隔离**，不再“每个项目覆盖前一个”。
 
-</div>
+### 2) LLM 结构化抽取可单独切换（应对审核/兼容性）
 
-## ⚡ 项目概述
+新增 `EXTRACT_API_KEY / EXTRACT_BASE_URL / EXTRACT_MODEL_NAME`：
+- 用于“本体生成 / 实体关系抽取”等 JSON 结构化任务
+- 当你遇到 `400 data_inspection_failed / inappropriate content`（某些供应商更严格）时，可只替换抽取模型，不影响主 LLM 配置。
 
-**MiroFish** 是一款基于多智能体技术的新一代 AI 预测引擎。通过提取现实世界的种子信息（如突发新闻、政策草案、金融信号），自动构建出高保真的平行数字世界。在此空间内，成千上万个具备独立人格、长期记忆与行为逻辑的智能体进行自由交互与社会演化。你可透过「上帝视角」动态注入变量，精准推演未来走向——**让未来在数字沙盘中预演，助决策在百战模拟后胜出**。
+同时做了兼容增强：
+- `LLM_BASE_URL` 自动补全 `/v1`（部分 OpenAI-compatible 提供方要求）
+- JSON 输出解析更健壮（部分提供方不支持 `response_format=json_object` 时自动降级）
 
-> 你只需：上传种子材料（数据分析报告或者有趣的小说故事），并用自然语言描述预测需求</br>
-> MiroFish 将返回：一份详尽的预测报告，以及一个可深度交互的高保真数字世界
+### 3) 构图容错：单个 chunk 抽取失败不再导致整图失败
 
-### 我们的愿景
+- 抽取触发提供方审核时会进入 safe-mode 重试
+- 仍失败则跳过该 chunk 的实体/边抽取（chunk 文本仍会写入存储），避免整个任务失败
 
-MiroFish 致力于打造映射现实的群体智能镜像，通过捕捉个体互动引发的群体涌现，突破传统预测的局限：
+### 4) 节点重复优化：Person/Organization/Product/Location 类型归一
 
-- **于宏观**：我们是决策者的预演实验室，让政策与公关在零风险中试错
-- **于微观**：我们是个人用户的创意沙盘，无论是推演小说结局还是探索脑洞，皆可有趣、好玩、触手可及
+针对“同名但 entity_type 不同导致多个节点”的问题：
+- 构图入库前对实体类型做归一映射（`Person/Organization/Product/Location`）
+- 同时保留原始抽取类型到节点属性 `source_entity_types`，便于追溯
 
-从严肃预测到趣味仿真，我们让每一个如果都能看见结果，让预测万物成为可能。
+### 5) 模拟启动体验与兼容
 
-## 🎬 演示视频
+- `GRAPH_BACKEND=local` 时不支持“模拟过程中实时回写图谱记忆”（原本给 Zep 用）：
+  - 后端会自动降级关闭 `enable_graph_memory_update`，避免 400/500
+  - 前端会显示 warning，而不是直接失败
+- Step3 启动模拟前自动检测并执行 `prepare`（避免“未准备直接 start 导致 400”）
 
+### 6) 报告工具链本地化补齐
 
-<div align="center">
-<a href="https://www.bilibili.com/video/BV1VYBsBHEMY/" target="_blank"><img src="./static/image/武大模拟演示封面.png" alt="MiroFish Demo Video" width="75%"/></a>
+ReportAgent 在本地模式下的工具服务由 `LocalToolsService` 提供，已补齐：
+- `get_simulation_context`（与上游接口对齐）
+- `interview_agents`：直接调用真实的 OASIS 采访批量接口（需要模拟环境仍在运行）
 
-点击图片查看使用微舆BettaFish生成的《武大舆情报告》进行预测的完整演示视频
-</div>
+### 7) 历史项目列表页面
 
-> 红楼梦结局模拟推演演示视频、金融方向预测示例演示视频等陆续更新中...
+新增前端项目列表页：
+- 路由：`/projects`
+- 支持查看历史项目列表并点击进入对应项目流程页
 
-## 🔄 工作流程
+## 数据存储位置（如何查阅历史项目）
 
-1. **图谱构建**：现实种子提取 & 个体与群体记忆注入 & GraphRAG构建
-2. **环境搭建**：实体关系抽取 & 人设生成 & 环境配置Agent注入仿真参数
-3. **开始模拟**：双平台并行模拟 & 自动解析预测需求 & 动态更新时序记忆
-4. **报告生成**：ReportAgent拥有丰富的工具集与模拟后环境进行深度交互
-5. **深度互动**：与模拟世界中的任意一位进行对话 & 与ReportAgent进行对话
+### 项目元数据与上传文件（本地文件）
 
-## 🚀 快速开始
+项目会以 `project_id` 持久化在后端 `uploads` 目录中：
+- 项目目录：`MiroFish-Optimize/backend/uploads/projects/<project_id>/`
+- 元数据：`MiroFish-Optimize/backend/uploads/projects/<project_id>/project.json`
+- 原始文件：`MiroFish-Optimize/backend/uploads/projects/<project_id>/files/`
+- 抽取文本：`MiroFish-Optimize/backend/uploads/projects/<project_id>/extracted_text.txt`
 
-### 前置要求
+查看历史项目有两种方式：
+- 前端：打开 `http://localhost:3000/projects`
+- 后端 API：`GET /api/graph/project/list`
 
-> 注：MiroFish在Mac环境下完成开发与测试，Windows兼容性未知，测试中
+### 图谱与向量（本地服务）
 
-| 工具 | 版本要求 | 说明 | 安装检查 |
-|------|---------|------|---------|
-| **Node.js** | 18+ | 前端运行环境，包含 npm | `node -v` |
-| **Python** | 3.11+ | 后端运行环境 | `python --version` |
-| **uv** | 最新版 | Python 包管理器 | `uv --version` |
+- 图谱：Neo4j（容器默认暴露 `bolt://localhost:7687`，浏览器 `http://localhost:7474`）
+- 向量：Qdrant（默认 `http://localhost:6333`）
+- Qdrant collection：由 `.env` 的 `QDRANT_COLLECTION_CHUNKS` 控制（默认 `mirofish_chunks`）
 
-### 1. 配置环境变量
+## 如何运行（Windows / macOS 通用）
 
-```bash
-# 复制示例配置文件
-cp .env.example .env
+### 0) 前置依赖
 
-# 编辑 .env 文件，填入必要的 API 密钥
-```
+- Node.js 18+
+- Python 3.11+
+- `uv`（Python 依赖管理）
+- Docker（推荐，用于一键启动 Neo4j/Qdrant）
 
-**必需的环境变量：**
-
-```env
-# LLM API配置（支持 OpenAI SDK 格式的任意 LLM）
-# 推荐使用阿里百炼平台qwen-plus模型：https://bailian.console.aliyun.com/
-# 注意消耗较大，可先进行小于40轮的模拟尝试
-LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL_NAME=qwen-plus
-
-# 存储后端（推荐本地化：Neo4j + Qdrant）
-GRAPH_BACKEND=local
-VECTOR_BACKEND=qdrant
-
-# Neo4j（docker-compose.local.yml 默认账号 neo4j / mirofish）
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=mirofish
-NEO4J_DATABASE=neo4j
-
-# Qdrant
-QDRANT_URL=http://localhost:6333
-QDRANT_COLLECTION_CHUNKS=mirofish_chunks
-
-# Embedding（默认复用 LLM 配置；若你的 LLM 提供方不支持 embeddings，可改用支持 embeddings 的配置，或将 VECTOR_BACKEND=none）
-EMBEDDING_MODEL_NAME=text-embedding-3-small
-```
-
-### （可选）启动本地 Neo4j + Qdrant
-
-如果你使用 `GRAPH_BACKEND=local`，建议用 Docker 启动本地依赖：
+### 1) 启动本地依赖（Neo4j + Qdrant）
 
 ```bash
 docker compose -f docker-compose.local.yml up -d
 ```
 
-如需继续使用 Zep Cloud（可能遇到免费版限流 429）：
+默认 Neo4j 账号密码在 `docker-compose.local.yml` 中写死为：
+- 用户：`neo4j`
+- 密码：`mirofish`
 
-```env
-GRAPH_BACKEND=zep
-ZEP_API_KEY=your_zep_api_key
-```
+对应 `.env` 里需要保持一致：`NEO4J_PASSWORD=mirofish`
 
-### 2. 安装依赖
+### 2) 配置环境变量
 
 ```bash
-# 一键安装所有依赖（根目录 + 前端 + 后端）
+cp .env.example .env
+```
+
+至少需要配置：
+
+```env
+# OpenAI-compatible LLM
+LLM_API_KEY=你的key
+LLM_BASE_URL=你的base_url
+LLM_MODEL_NAME=你的模型名
+
+# 本地化存储
+GRAPH_BACKEND=local
+VECTOR_BACKEND=qdrant
+
+# Neo4j（与 compose 一致）
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=mirofish
+
+# Qdrant
+QDRANT_URL=http://localhost:6333
+```
+
+可选项（强烈建议了解）：
+
+```env
+# 抽取专用 LLM：解决 data_inspection_failed 等审核问题
+# EXTRACT_API_KEY=...
+# EXTRACT_BASE_URL=...
+# EXTRACT_MODEL_NAME=...
+
+# Embeddings：如果你的提供方支持 embeddings，建议配置；不支持则可 VECTOR_BACKEND=none
+EMBEDDING_MODEL_NAME=...
+# EMBEDDING_BASE_URL=...
+# EMBEDDING_API_KEY=...
+```
+
+### 3) 安装依赖
+
+在项目根目录执行：
+
+```bash
 npm run setup:all
 ```
 
-或者分步安装：
+### 4) 启动服务
 
 ```bash
-# 安装 Node 依赖（根目录 + 前端）
-npm run setup
-
-# 安装 Python 依赖（自动创建虚拟环境）
-npm run setup:backend
-```
-
-### 3. 启动服务
-
-```bash
-# 同时启动前后端（在项目根目录执行）
 npm run dev
 ```
 
-**服务地址：**
+访问：
 - 前端：`http://localhost:3000`
-- 后端 API：`http://localhost:5001`
+- 后端：`http://localhost:5001`
 
-**单独启动：**
+## 如何驱动（推荐使用流程）
 
-```bash
-npm run backend   # 仅启动后端
-npm run frontend  # 仅启动前端
-```
+1. Step1 图谱构建：上传材料 → 生成本体 → 构图（本地写入 Neo4j，可选写入 Qdrant）
+2. Step2 环境准备：基于图谱实体生成 Agent Profiles（写入 `backend/uploads/simulations/<simulation_id>/...`）
+3. Step3 启动模拟：启动并行模拟（Twitter + Reddit），本地模式会自动关闭“图谱记忆实时回写”
+4. Step4 生成报告：ReportAgent 调用本地工具（图 + 向量 + 采访）生成报告
+5. Step5 交互：对报告与模拟世界进行交互式查询
 
-## 📄 致谢
+## 常见问题（Troubleshooting）
 
-**MiroFish 得到了盛大集团的战略支持和孵化！**
+- 报错 `400 data_inspection_failed / inappropriate content`：
+  - 这是提供方的输出审核拦截；使用 `EXTRACT_*` 把“抽取模型”单独切换到更合适的提供方/模型。
+- 启动模拟 `HTTP 400: 未准备好，请先 prepare`：
+  - Step3 已增加自动 prepare；如果仍发生，请确认你启动的是 `MiroFish-Optimize` 这套后端（端口 5001）。
+- 报错 `interview_agents ... env 未运行或已关闭`：
+  - 采访工具需要模拟环境仍在运行；不要提前关闭环境（或先重新启动模拟）。
+- 图谱里同名多节点：
+  - 这是“类型抖动”引起的；本优化版已对 Person/Organization/Product/Location 做归一，需**重建图谱**后生效。
 
-MiroFish 的核心仿真引擎由 **[OASIS](https://github.com/camel-ai/oasis)** 驱动。OASIS 是由 [CAMEL-AI](https://github.com/camel-ai) 团队开发的高性能社交媒体模拟框架，支持百万级智能体交互仿真，为 MiroFish 的群体智能涌现提供了坚实的技术基础。我们衷心感谢 CAMEL-AI 团队的开源贡献！
+## License
 
-## 📈 项目统计
+遵循上游 MiroFish 的开源许可证（仓库根目录 `LICENSE`）。
 
-<a href="https://www.star-history.com/#666ghj/MiroFish&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=666ghj/MiroFish&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=666ghj/MiroFish&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=666ghj/MiroFish&type=date&legend=top-left" />
- </picture>
-</a>

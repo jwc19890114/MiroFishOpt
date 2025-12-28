@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from ..config import Config
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
 
@@ -17,7 +18,71 @@ logger = get_logger("mirofish.local_graph_extractor")
 
 class LocalGraphExtractor:
     def __init__(self, llm: Optional[LLMClient] = None):
-        self.llm = llm or LLMClient()
+        self.llm = llm or LLMClient(
+            api_key=Config.EXTRACT_API_KEY,
+            base_url=Config.EXTRACT_BASE_URL,
+            model=Config.EXTRACT_MODEL_NAME,
+        )
+
+    @staticmethod
+    def _is_data_inspection_failed(err: Exception) -> bool:
+        try:
+            body = getattr(err, "body", None)
+            if isinstance(body, dict):
+                code = ((body.get("error") or {}).get("code") or "").lower()
+                msg = ((body.get("error") or {}).get("message") or "").lower()
+                return "data_inspection_failed" in code or "inappropriate" in msg
+        except Exception:
+            pass
+        text = (str(err) or "").lower()
+        return ("data_inspection_failed" in text) or ("inappropriate content" in text)
+
+    def _extract_safe(self, text: str, ontology: Dict[str, Any]) -> Dict[str, Any]:
+        entity_types = [e.get("name") for e in (ontology or {}).get("entity_types", []) if e.get("name")]
+        edge_types = [e.get("name") for e in (ontology or {}).get("edge_types", []) if e.get("name")]
+
+        system = (
+            "You are a strict JSON-only information extractor.\n"
+            "Return ONLY a valid JSON object.\n"
+            "Safety: do not output explicit/sexual/violent/hateful/self-harm content.\n"
+            "If the input might trigger moderation, redact details using '[REDACTED]' and keep outputs minimal.\n"
+        )
+
+        user = {
+            "text": text,
+            "allowed_entity_types": entity_types,
+            "allowed_relation_types": edge_types,
+            "requirements": {
+                "only_use_allowed_types": True,
+                "deduplicate_entities_by_name_and_type": True,
+                "do_not_guess": True,
+                "return_empty_when_none": True,
+                "avoid_quoting_input": True,
+            },
+            "output_schema": {
+                "entities": [{"name": "string", "type": "string", "summary": "", "attributes": {}}],
+                "relations": [
+                    {
+                        "source": "string",
+                        "source_type": "string",
+                        "target": "string",
+                        "target_type": "string",
+                        "relation": "string",
+                        "fact": "",
+                        "attributes": {},
+                    }
+                ],
+            },
+        }
+
+        return self.llm.chat_json(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+            ],
+            temperature=0.0,
+            max_tokens=1536,
+        )
 
     def extract(self, text: str, ontology: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -75,8 +140,16 @@ class LocalGraphExtractor:
                 max_tokens=2048,
             )
         except Exception as e:
-            logger.error(f"LLM extract failed: {e}")
-            raise
+            if self._is_data_inspection_failed(e):
+                logger.warning("LLM extract blocked by provider moderation; retrying in safe mode.")
+                try:
+                    result = self._extract_safe(text=text, ontology=ontology)
+                except Exception as e2:
+                    logger.error(f"Safe-mode extract still failed: {e2}")
+                    return {"entities": [], "relations": []}
+            else:
+                logger.error(f"LLM extract failed: {e}")
+                raise
 
         entities = result.get("entities") or []
         relations = result.get("relations") or []

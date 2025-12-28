@@ -35,6 +35,17 @@ service.interceptors.response.use(
   },
   error => {
     console.error('Response error:', error)
+
+    // Prefer backend-provided error message for non-2xx responses.
+    // Flask handlers usually return: { success: false, error: '...' }
+    if (error?.response?.data && typeof error.response.data === 'object') {
+      const data = error.response.data
+      const msg = data.error || data.message
+      if (msg) {
+        const status = error.response.status
+        return Promise.reject(new Error(`HTTP ${status}: ${msg}`))
+      }
+    }
     
     // 处理超时
     if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {

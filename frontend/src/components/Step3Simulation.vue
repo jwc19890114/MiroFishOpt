@@ -289,6 +289,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { 
+  getSimulation,
+  prepareSimulation,
+  getPrepareStatus,
   startSimulation, 
   stopSimulation,
   getRunStatus, 
@@ -322,6 +325,68 @@ const runStatus = ref({})
 const allActions = ref([]) // 所有动作（增量累积）
 const actionIds = ref(new Set()) // 用于去重的动作ID集合
 const scrollContainer = ref(null)
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+const getAxiosErrorMessage = (err) => {
+  const resp = err?.response
+  const data = resp?.data
+  if (data && typeof data === 'object') {
+    return data.error || data.message || err?.message
+  }
+  return err?.message
+}
+
+const ensureSimulationPrepared = async () => {
+  if (!props.simulationId) return
+
+  // Quick check: if already READY, skip.
+  try {
+    const sim = await getSimulation(props.simulationId)
+    const status = (sim?.data?.status || '').toLowerCase()
+    if (status === 'ready') return
+  } catch (_) {
+    // ignore and try prepare directly
+  }
+
+  addLog('检测到模拟未准备，开始准备模拟环境...')
+
+  const prep = await prepareSimulation({
+    simulation_id: props.simulationId,
+    use_llm_for_profiles: true,
+    parallel_profile_count: 5
+  })
+
+  if (prep?.data?.already_prepared) {
+    addLog('检测到已完成的准备结果，直接使用')
+    return
+  }
+
+  const taskId = prep?.data?.task_id
+  if (!taskId) {
+    throw new Error('准备模拟失败：未返回 task_id')
+  }
+
+  addLog(`准备任务已启动: ${taskId}`)
+
+  // Poll until ready/failed. Max ~10 minutes.
+  for (let i = 0; i < 300; i++) {
+    await sleep(2000)
+    const st = await getPrepareStatus({ task_id: taskId, simulation_id: props.simulationId })
+    const status = (st?.data?.status || '').toLowerCase()
+    const msg = st?.data?.message
+    if (msg) addLog(msg)
+    if (status === 'completed' || status === 'ready' || st?.data?.already_prepared) {
+      addLog('✓ 准备工作已完成')
+      return
+    }
+    if (status === 'failed') {
+      throw new Error(st?.data?.error || '准备失败')
+    }
+  }
+
+  throw new Error('准备超时，请稍后重试')
+}
 
 // Computed
 // 按时间顺序显示动作（最新的在最后面，即底部）
@@ -392,6 +457,8 @@ const doStartSimulation = async () => {
   emit('update-status', 'processing')
   
   try {
+    await ensureSimulationPrepared()
+
     const params = {
       simulation_id: props.simulationId,
       platform: 'parallel',
@@ -403,9 +470,7 @@ const doStartSimulation = async () => {
       params.max_rounds = props.maxRounds
       addLog(`设置最大模拟轮数: ${props.maxRounds}`)
     }
-    
-    addLog('已开启动态图谱更新模式')
-    
+
     const res = await startSimulation(params)
     
     if (res.success && res.data) {
@@ -414,6 +479,12 @@ const doStartSimulation = async () => {
       }
       addLog('✓ 模拟引擎启动成功')
       addLog(`  ├─ PID: ${res.data.process_pid || '-'}`)
+
+      if (res.data.graph_memory_update_enabled) {
+        addLog('已开启图谱记忆实时更新')
+      } else if (res.data.graph_memory_update_warning) {
+        addLog(`⚠ ${res.data.graph_memory_update_warning}`)
+      }
       
       phase.value = 1
       runStatus.value = res.data
@@ -426,8 +497,9 @@ const doStartSimulation = async () => {
       emit('update-status', 'error')
     }
   } catch (err) {
-    startError.value = err.message
-    addLog(`✗ 启动异常: ${err.message}`)
+    const msg = getAxiosErrorMessage(err)
+    startError.value = msg
+    addLog(`✗ 启动异常: ${msg}`)
     emit('update-status', 'error')
   } finally {
     isStarting.value = false

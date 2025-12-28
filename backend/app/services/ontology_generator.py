@@ -5,6 +5,7 @@
 
 import json
 from typing import Dict, Any, List, Optional
+from ..config import Config
 from ..utils.llm_client import LLMClient
 
 
@@ -162,7 +163,11 @@ class OntologyGenerator:
     """
     
     def __init__(self, llm_client: Optional[LLMClient] = None):
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient(
+            api_key=Config.EXTRACT_API_KEY,
+            base_url=Config.EXTRACT_BASE_URL,
+            model=Config.EXTRACT_MODEL_NAME,
+        )
     
     def generate(
         self,
