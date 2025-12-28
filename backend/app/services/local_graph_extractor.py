@@ -6,6 +6,7 @@ Given a text chunk and an ontology, it returns structured entities and relations
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from ..utils.llm_client import LLMClient
@@ -68,7 +69,7 @@ class LocalGraphExtractor:
             result = self.llm.chat_json(
                 messages=[
                     {"role": "system", "content": system},
-                    {"role": "user", "content": str(user)},
+                    {"role": "user", "content": json.dumps(user, ensure_ascii=False, indent=2)},
                 ],
                 temperature=0.2,
                 max_tokens=2048,
@@ -123,4 +124,3 @@ class LocalGraphExtractor:
             )
 
         return {"entities": cleaned_entities, "relations": cleaned_relations}
-
