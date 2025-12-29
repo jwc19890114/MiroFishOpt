@@ -932,10 +932,13 @@ class ReportAgent:
         
         return tool_calls
     
-    def _get_tools_description(self) -> str:
+    def _get_tools_description(self, exclude_tools: Optional[set] = None) -> str:
         """生成工具描述文本"""
+        exclude_tools = exclude_tools or set()
         desc_parts = ["可用工具："]
         for name, tool in self.tools.items():
+            if name in exclude_tools:
+                continue
             params_desc = ", ".join([f"{k}: {v}" for k, v in tool["parameters"].items()])
             desc_parts.append(f"- {name}: {tool['description']}")
             if params_desc:
@@ -1383,6 +1386,16 @@ class ReportAgent:
             
             # 解析工具调用
             tool_calls = self._parse_tool_calls(response)
+
+            if disable_interview and tool_calls:
+                tool_calls = [c for c in tool_calls if c.get("name") != "interview_agents"]
+                if not tool_calls:
+                    messages.append({"role": "assistant", "content": response})
+                    messages.append({
+                        "role": "user",
+                        "content": "【限制】禁止调用 interview_agents。请使用图谱/向量检索工具回答。"
+                    })
+                    continue
             
             if not tool_calls:
                 # 没有工具调用也没有最终答案
@@ -1780,7 +1793,8 @@ class ReportAgent:
     def chat(
         self, 
         message: str,
-        chat_history: List[Dict[str, str]] = None
+        chat_history: List[Dict[str, str]] = None,
+        disable_interview: bool = False
     ) -> Dict[str, Any]:
         """
         与Report Agent对话
@@ -1814,6 +1828,13 @@ class ReportAgent:
         except Exception as e:
             logger.warning(f"获取报告内容失败: {e}")
         
+        tools_desc = self._get_tools_description(
+            exclude_tools={"interview_agents"} if disable_interview else None
+        )
+        interview_note = ""
+        if disable_interview:
+            interview_note = "\n【限制】本次对话禁止调用 interview_agents，只能使用图谱/向量检索工具。\n"
+
         # 构建系统提示
         system_prompt = f"""你是一个简洁高效的模拟预测助手。
 
@@ -1828,9 +1849,9 @@ class ReportAgent:
 2. 直接回答问题，避免冗长的思考论述
 3. 仅在报告内容不足以回答时，才调用工具检索更多数据
 4. 回答要简洁、清晰、有条理
-
+{interview_note}
 【可用工具】（仅在需要时使用，最多调用1-2次）
-{self._get_tools_description()}
+{tools_desc}
 
 【工具调用格式】
 <tool_call>

@@ -647,7 +647,44 @@ const sendMessage = async () => {
   }
 }
 
-const sendToReportAgent = async (message) => {
+const isInterviewTimeout = (err) => {
+  const msg = (err?.message || '').toLowerCase()
+  return msg.includes('504') || msg.includes('timeout') || msg.includes('超时')
+}
+
+const isInterviewEnvUnavailable = (err) => {
+  const msg = (err?.message || '').toLowerCase()
+  return msg.includes('环境未运行') || msg.includes('已关闭') || msg.includes('env not running')
+}
+
+const shouldFallbackInterview = (err) => {
+  return isInterviewTimeout(err) || isInterviewEnvUnavailable(err)
+}
+
+const buildPersonaPrompt = (agent, question, historyContext = '') => {
+  const name = agent?.realname || agent?.name || agent?.username || 'Agent'
+  const username = agent?.username ? `@${agent.username}` : ''
+  const role = agent?.profession || agent?.role || '未知'
+  const bio = agent?.bio || agent?.description || ''
+  const persona = agent?.persona || agent?.user_char || ''
+  const history = historyContext ? `【对话历史】\n${historyContext}\n` : ''
+
+  return (
+    `请以以下模拟Agent身份回答用户问题。保持人设立场与知识边界，不要编造超出人设的信息。\n` +
+    `【Agent档案】\n` +
+    `- 名称: ${name} ${username}\n` +
+    `- 角色/职业: ${role}\n` +
+    `- 简介: ${bio || '无'}\n` +
+    `- 人设/立场: ${persona || '无'}\n` +
+    `${history}` +
+    `【用户问题】${question}\n` +
+    `【回答要求】第一人称回答，简洁清晰；必要时可基于图谱/向量检索到的事实。`
+  )
+}
+
+const sendToReportAgent = async (message, options = {}) => {
+  const disableInterview = !!options.disableInterview
+  const responsePrefix = options.responsePrefix || ''
   addLog(`向 Report Agent 发送: ${message.substring(0, 50)}...`)
   
   // Build chat history for API
@@ -662,13 +699,15 @@ const sendToReportAgent = async (message) => {
   const res = await chatWithReport({
     simulation_id: props.simulationId,
     message: message,
-    chat_history: historyForApi
+    chat_history: historyForApi,
+    disable_interview: disableInterview
   })
   
   if (res.success && res.data) {
+    const prefix = responsePrefix ? `${responsePrefix}\n\n` : ''
     chatHistory.value.push({
       role: 'assistant',
-      content: res.data.response || res.data.answer || '无响应',
+      content: prefix + (res.data.response || res.data.answer || '无响应'),
       timestamp: new Date().toISOString()
     })
     addLog('Report Agent 已回复')
@@ -695,13 +734,35 @@ const sendToAgent = async (message) => {
     prompt = `以下是我们之前的对话：\n${historyContext}\n\n现在我的新问题是：${message}`
   }
   
-  const res = await interviewAgents({
-    simulation_id: props.simulationId,
-    interviews: [{
-      agent_id: selectedAgentIndex.value,
-      prompt: prompt
-    }]
-  })
+  let res
+  try {
+    res = await interviewAgents({
+      simulation_id: props.simulationId,
+      interviews: [{
+        agent_id: selectedAgentIndex.value,
+        prompt: prompt
+      }]
+    })
+  } catch (err) {
+    if (shouldFallbackInterview(err)) {
+      addLog('采访不可用，已改用人设+图谱检索回答')
+      const personaPrompt = buildPersonaPrompt(
+        selectedAgent.value,
+        message,
+        chatHistory.value
+          .filter(msg => msg.content !== message)
+          .slice(-6)
+          .map(msg => `${msg.role === 'user' ? '提问者' : '你'}：${msg.content}`)
+          .join('\n')
+      )
+      await sendToReportAgent(personaPrompt, {
+        disableInterview: true,
+        responsePrefix: '【采访不可用，已改用人设+图谱检索】'
+      })
+      return
+    }
+    throw err
+  }
   
   if (res.success && res.data) {
     // 正确的数据路径: res.data.result.results 是一个对象字典
@@ -782,10 +843,45 @@ const submitSurvey = async () => {
       prompt: surveyQuestion.value.trim()
     }))
     
-    const res = await interviewAgents({
-      simulation_id: props.simulationId,
-      interviews: interviews
-    })
+    let res
+    try {
+      res = await interviewAgents({
+        simulation_id: props.simulationId,
+        interviews: interviews
+      })
+    } catch (err) {
+      if (shouldFallbackInterview(err)) {
+        addLog('问卷采访不可用，已改用人设+图谱检索')
+        try {
+          const surveyResultsList = []
+          for (const interview of interviews) {
+            const agentIdx = interview.agent_id
+            const agent = profiles.value[agentIdx]
+            const personaPrompt = buildPersonaPrompt(agent, surveyQuestion.value.trim())
+            const fallbackRes = await chatWithReport({
+              simulation_id: props.simulationId,
+              message: personaPrompt,
+              chat_history: [],
+              disable_interview: true
+            })
+            const fallbackAnswer = fallbackRes?.data?.response || fallbackRes?.data?.answer || '无响应'
+            surveyResultsList.push({
+              agent_id: agentIdx,
+              agent_name: agent?.username || `Agent ${agentIdx}`,
+              profession: agent?.profession,
+              question: surveyQuestion.value.trim(),
+              answer: `【采访不可用，已改用人设+图谱检索】\n\n${fallbackAnswer}`
+            })
+          }
+          surveyResults.value = surveyResultsList
+          addLog(`已返回 ${surveyResults.value.length} 条人设检索结果`)
+        } catch (fallbackErr) {
+          addLog(`人设检索失败: ${fallbackErr.message}`)
+        }
+        return
+      }
+      throw err
+    }
     
     if (res.success && res.data) {
       // 正确的数据路径: res.data.result.results 是一个对象字典

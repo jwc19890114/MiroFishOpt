@@ -191,7 +191,7 @@ npm run dev
 2. Step2 环境准备：基于图谱实体生成 Agent Profiles（写入 `backend/uploads/simulations/<simulation_id>/...`）
 3. Step3 启动模拟：启动并行模拟（Twitter + Reddit），本地模式会自动关闭“图谱记忆实时回写”；需要中途停止时可点击页面右上角「暂停模拟」
 4. Step4 生成报告：ReportAgent 调用本地工具（图 + 向量 + 采访）生成报告
-5. Step5 交互：对报告与模拟世界进行交互式查询
+5. Step5 交互：对报告与模拟世界进行交互式查询；若采访不可用/超时，会自动降级为“人设 + 图谱/向量检索”回答
 
 ## 报告导出
 
@@ -209,6 +209,8 @@ npm run dev
   - Step3 已增加自动 prepare；如果仍发生，请确认你启动的是 `MiroFish-Optimize` 这套后端（端口 5001）。
 - 报错 `interview_agents ... env 未运行或已关闭`：
   - 采访工具需要模拟环境仍在运行；不要提前关闭环境（或先重新启动模拟）。
+- 交互阶段采访 `HTTP 400/504` 超时：
+  - 这是 IPC 未收到模拟进程响应；当前版本已自动降级为“人设 + 图谱/向量检索”兜底回答。
 - 图谱里同名多节点：
   - 这是“类型抖动”引起的；本优化版已对 Person/Organization/Product/Location 做归一，需**重建图谱**后生效。
 

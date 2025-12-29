@@ -476,6 +476,7 @@ def chat_with_report_agent():
         {
             "simulation_id": "sim_xxxx",        // 必填，模拟ID
             "message": "请解释一下舆情走向",    // 必填，用户消息
+            "disable_interview": false,         // 可选，禁止调用采访工具（只用图谱/向量检索）
             "chat_history": [                   // 可选，对话历史
                 {"role": "user", "content": "..."},
                 {"role": "assistant", "content": "..."}
@@ -498,6 +499,7 @@ def chat_with_report_agent():
         simulation_id = data.get('simulation_id')
         message = data.get('message')
         chat_history = data.get('chat_history', [])
+        disable_interview = bool(data.get('disable_interview', False))
         
         if not simulation_id:
             return jsonify({
@@ -544,7 +546,11 @@ def chat_with_report_agent():
             simulation_requirement=simulation_requirement
         )
         
-        result = agent.chat(message=message, chat_history=chat_history)
+        result = agent.chat(
+            message=message,
+            chat_history=chat_history,
+            disable_interview=disable_interview
+        )
         
         return jsonify({
             "success": True,
