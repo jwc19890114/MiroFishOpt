@@ -82,3 +82,27 @@ export function listProjects(limit = 50) {
     })
   )
 }
+
+/**
+ * 删除项目
+ * @param {String} projectId - 项目ID
+ * @returns {Promise}
+ */
+export function deleteProject(projectId) {
+  return service({
+    url: `/api/graph/project/${projectId}`,
+    method: 'delete'
+  })
+}
+
+/**
+ * 删除图谱
+ * @param {String} graphId - 图谱ID
+ * @returns {Promise}
+ */
+export function deleteGraph(graphId) {
+  return service({
+    url: `/api/graph/delete/${graphId}`,
+    method: 'delete'
+  })
+}

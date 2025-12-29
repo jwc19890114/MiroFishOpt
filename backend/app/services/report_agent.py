@@ -1096,7 +1096,8 @@ class ReportAgent:
         outline: ReportOutline,
         previous_sections: List[str],
         progress_callback: Optional[Callable] = None,
-        section_index: int = 0
+        section_index: int = 0,
+        disable_interview: bool = False
     ) -> str:
         """
         使用ReACT模式生成单个章节内容

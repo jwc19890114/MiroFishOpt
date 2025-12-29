@@ -55,6 +55,11 @@ Click the image to watch the complete demo video for prediction using BettaFish-
 4. **Report Generation**: ReportAgent with rich toolset for deep interaction with post-simulation environment
 5. **Deep Interaction**: Chat with any agent in the simulated world & Interact with ReportAgent. If interviews are unavailable/timeout, it falls back to persona + graph/vector retrieval.
 
+## MiroFishOpt Updates
+
+- Projects page: select and bulk delete projects (cleans graph first).
+- Report generation stability: fix undefined `disable_interview` when interviews are disabled.
+
 ## 🚀 Quick Start
 
 ### Prerequisites

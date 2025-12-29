@@ -32,6 +32,15 @@
             <option value="all">显示全部</option>
           </select>
         </div>
+        <div class="bulk">
+          <button
+            class="btn danger"
+            @click="deleteSelected"
+            :disabled="loading || deleting || selectedCount === 0"
+          >
+            删除所选 ({{ selectedCount }})
+          </button>
+        </div>
         <div class="meta">
           <span v-if="loading">加载中...</span>
           <span v-else>共 {{ filteredProjects.length }} 个</span>
@@ -52,6 +61,7 @@
 
       <div v-else class="list">
         <div class="list-header">
+          <div class="col select">选择</div>
           <div class="col name">项目</div>
           <div class="col status">交互</div>
           <div class="col ids">ID</div>
@@ -59,13 +69,24 @@
           <div class="col action">操作</div>
         </div>
 
-        <button
+        <div
           v-for="p in filteredProjects"
           :key="p.project_id"
           class="row"
-          type="button"
-          @click="p.latest_completed_report?.report_id ? openInteraction(p.latest_completed_report.report_id) : (p.latest_report?.report_id ? openReport(p.latest_report.report_id) : (p.latest_ready_simulation?.simulation_id ? openEnv(p.latest_ready_simulation.simulation_id) : openProject(p.project_id)))"
+          role="button"
+          tabindex="0"
+          @click="handleRowClick(p)"
+          @keydown.enter="handleRowClick(p)"
         >
+          <div class="col select" @click.stop>
+            <input
+              class="select-box"
+              type="checkbox"
+              :checked="isSelected(p.project_id)"
+              @change="toggleSelected(p.project_id)"
+              :aria-label="`选择项目 ${p.project_id}`"
+            />
+          </div>
           <div class="col name">
             <div class="name-main">{{ p.name || 'Unnamed Project' }}</div>
             <div class="name-sub" v-if="p.simulation_requirement">
@@ -119,7 +140,7 @@
               <button class="mini-btn" type="button" @click="openProject(p.project_id)">项目 →</button>
             </div>
           </div>
-        </button>
+        </div>
       </div>
     </main>
   </div>
@@ -128,17 +149,19 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { listProjects } from '../api/graph'
+import { deleteGraph, deleteProject, listProjects } from '../api/graph'
 import { listSimulations } from '../api/simulation'
 import { checkReportStatus } from '../api/report'
 
 const router = useRouter()
 
 const loading = ref(false)
+const deleting = ref(false)
 const error = ref('')
 const projects = ref([])
 const query = ref('')
 const filterMode = ref('interactive')
+const selectedIds = ref(new Set())
 
 const ENV_READY_STATUSES = new Set(['ready', 'running', 'paused', 'stopped', 'completed'])
 
@@ -250,6 +273,14 @@ const refresh = async () => {
         latest_completed_report: latestReport
       }
     })
+    if (selectedIds.value.size) {
+      const availableIds = new Set(projects.value.map(p => p.project_id))
+      const next = new Set()
+      for (const id of selectedIds.value) {
+        if (availableIds.has(id)) next.add(id)
+      }
+      selectedIds.value = next
+    }
   } catch (e) {
     error.value = e?.message || 'Unknown error'
   } finally {
@@ -259,6 +290,24 @@ const refresh = async () => {
 
 const clearQuery = () => {
   query.value = ''
+}
+
+const selectedCount = computed(() => selectedIds.value.size)
+
+const isSelected = (projectId) => selectedIds.value.has(projectId)
+
+const toggleSelected = (projectId) => {
+  const next = new Set(selectedIds.value)
+  if (next.has(projectId)) {
+    next.delete(projectId)
+  } else {
+    next.add(projectId)
+  }
+  selectedIds.value = next
+}
+
+const clearSelection = () => {
+  selectedIds.value = new Set()
 }
 
 const filteredProjects = computed(() => {
@@ -287,6 +336,23 @@ const filteredProjects = computed(() => {
   })
 })
 
+const handleRowClick = (project) => {
+  if (!project) return
+  if (project.latest_completed_report?.report_id) {
+    openInteraction(project.latest_completed_report.report_id)
+    return
+  }
+  if (project.latest_report?.report_id) {
+    openReport(project.latest_report.report_id)
+    return
+  }
+  if (project.latest_ready_simulation?.simulation_id) {
+    openEnv(project.latest_ready_simulation.simulation_id)
+    return
+  }
+  openProject(project.project_id)
+}
+
 const openProject = (projectId) => {
   if (!projectId) return
   router.push({ name: 'Process', params: { projectId } })
@@ -305,6 +371,46 @@ const openReport = (reportId) => {
 const openInteraction = (reportId) => {
   if (!reportId) return
   router.push({ name: 'Interaction', params: { reportId } })
+}
+
+const deleteSelected = async () => {
+  if (selectedIds.value.size === 0) return
+  if (!window.confirm(`确定删除选中的 ${selectedIds.value.size} 个项目？删除后无法恢复。`)) {
+    return
+  }
+
+  deleting.value = true
+  const failed = []
+  try {
+    const ids = Array.from(selectedIds.value)
+    for (const projectId of ids) {
+      const project = projects.value.find(p => p.project_id === projectId)
+      try {
+        if (project?.graph_id) {
+          await deleteGraph(project.graph_id)
+        }
+      } catch (e) {
+        failed.push({ projectId, error: e?.message || '图谱删除失败' })
+        continue
+      }
+
+      try {
+        await deleteProject(projectId)
+      } catch (e) {
+        failed.push({ projectId, error: e?.message || '项目删除失败' })
+      }
+    }
+
+    await refresh()
+    clearSelection()
+  } finally {
+    deleting.value = false
+  }
+
+  if (failed.length) {
+    const message = failed.map(item => `${item.projectId}: ${item.error}`).join('\n')
+    window.alert(`部分项目删除失败:\n${message}`)
+  }
 }
 
 const envStatusText = (status) => {
@@ -449,6 +555,12 @@ onMounted(() => {
   border-color: #ff4500;
 }
 
+.btn.danger {
+  background: #ff3b30;
+  border-color: #ff3b30;
+  color: #fff;
+}
+
 .content {
   max-width: 1200px;
   margin: 0 auto;
@@ -476,6 +588,11 @@ onMounted(() => {
   white-space: nowrap;
   color: #333;
   font-size: 0.9rem;
+}
+
+.bulk {
+  display: flex;
+  align-items: center;
 }
 
 .select {
@@ -544,7 +661,7 @@ onMounted(() => {
 
 .list-header {
   display: grid;
-  grid-template-columns: 2fr 0.7fr 1.6fr 1fr 1.2fr;
+  grid-template-columns: 56px 2fr 0.7fr 1.6fr 1fr 1.2fr;
   gap: 12px;
   padding: 12px 14px;
   background: #f7f7f7;
@@ -557,7 +674,7 @@ onMounted(() => {
   width: 100%;
   text-align: left;
   display: grid;
-  grid-template-columns: 2fr 0.7fr 1.6fr 1fr 1.2fr;
+  grid-template-columns: 56px 2fr 0.7fr 1.6fr 1fr 1.2fr;
   gap: 12px;
   padding: 14px;
   border: none;
@@ -572,6 +689,19 @@ onMounted(() => {
 
 .col {
   min-width: 0;
+}
+
+.col.select {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.select-box {
+  width: 16px;
+  height: 16px;
+  accent-color: #ff4500;
 }
 
 .name-main {
@@ -658,12 +788,17 @@ onMounted(() => {
 @media (max-width: 900px) {
   .list-header,
   .row {
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: 36px 1fr;
     grid-template-areas:
-      "name status"
-      "ids time";
+      "select name"
+      "select status"
+      "select ids"
+      "select time";
   }
 
+  .col.select {
+    grid-area: select;
+  }
   .col.name {
     grid-area: name;
   }
