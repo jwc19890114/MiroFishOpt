@@ -64,6 +64,8 @@ ReportAgent 在本地模式下的工具服务由 `LocalToolsService` 提供，�
 - 路由：`/projects`
 - 支持查看历史项目列表并点击进入对应项目流程页
 - 支持勾选批量删除项目（删除前确认，优先清理图谱再删除项目）
+- 默认入口已指向 `http://localhost:3000/projects`，首页可通过 `http://localhost:3000/home` 访问
+- `npm run dev` 会先启动本地依赖（自动尝试 unpause 再 docker compose up -d）
 
 ### 8) 报告生成稳定性
 

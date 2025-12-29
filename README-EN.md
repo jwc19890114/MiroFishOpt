@@ -59,6 +59,8 @@ Click the image to watch the complete demo video for prediction using BettaFish-
 
 - Projects page: select and bulk delete projects (cleans graph first).
 - Report generation stability: fix undefined `disable_interview` when interviews are disabled.
+- Default entry now points to `http://localhost:3000/projects`; homepage is available at `http://localhost:3000/home`.
+- `npm run dev` now starts local dependencies first (auto unpause, then docker compose up -d).
 
 ## 🚀 Quick Start
 
